@@ -71,6 +71,13 @@ export default function LandlordApp() {
   const [view, setView] = useState("dashboard");
   const [sideOpen, setSideOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [confirmInvite, setConfirmInvite] = useState(false);
+
+  const clearInviteParam = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("invite");
+    window.history.replaceState({}, "", url.toString());
+  };
 
   const inviteToken = useMemo(
     () => new URLSearchParams(window.location.search).get("invite"),
@@ -91,13 +98,23 @@ export default function LandlordApp() {
     (async () => {
       setLoadingM(true);
       try {
+        let ms = await loadMemberships();
+        if (cancelled) return;
         if (inviteToken) {
-          try { await redeemInvite(inviteToken); } catch (e) { /* already a member or invalid */ }
-          const url = new URL(window.location.href);
-          url.searchParams.delete("invite");
-          window.history.replaceState({}, "", url.toString());
+          if (ms.length === 0) {
+            // Fresh sign-in specifically to accept an invite → redeem automatically.
+            try { await redeemInvite(inviteToken); } catch (e) { /* invalid/expired */ }
+            clearInviteParam();
+            ms = await loadMemberships();
+          } else {
+            // Already a member of something — don't silently join. Ask first.
+            if (cancelled) return;
+            setMemberships(ms);
+            setActiveId((prev) => prev || (ms[0] && ms[0].account_id) || null);
+            setConfirmInvite(true);
+            return;
+          }
         }
-        const ms = await loadMemberships();
         if (cancelled) return;
         setMemberships(ms);
         setActiveId((prev) => prev || (ms[0] && ms[0].account_id) || null);
@@ -115,6 +132,18 @@ export default function LandlordApp() {
   }, [toast]);
 
   const active = memberships.find((m) => m.account_id === activeId) || memberships[0] || null;
+
+  async function acceptInvite() {
+    setConfirmInvite(false);
+    setLoadingM(true);
+    try { await redeemInvite(inviteToken); }
+    catch (e) { setToast(e.message || "Could not accept invitation"); }
+    clearInviteParam();
+    const ms = await loadMemberships();
+    setMemberships(ms);
+    setActiveId(ms[0]?.account_id || null);
+    setLoadingM(false);
+  }
 
   const nav = useMemo(() => {
     if (!active) return [];
@@ -134,6 +163,20 @@ export default function LandlordApp() {
   if (session === undefined) return <Splash text="Loading…" />;
   if (!session) return <LandlordLogin hasInvite={!!inviteToken} />;
   if (loadingM) return <Splash text="Setting up your workspace…" />;
+
+  if (confirmInvite) {
+    return (
+      <div className="ll-login"><div className="box">
+        <div className="logo"><img src="/icon-192.png" alt="" /><h2>Landlord Portal</h2></div>
+        <div className="note">
+          You're signed in as <b>{session.user?.email}</b>. Do you want to accept this invitation with this account?
+          <br /><br />If the invitation was sent to a different email address, sign out and open the link again.
+        </div>
+        <button className="btn blue" style={{ marginTop: 16 }} onClick={acceptInvite}>Accept as {session.user?.email}</button>
+        <button className="btn ghost" style={{ marginTop: 10 }} onClick={() => signOut()}>Sign out</button>
+      </div></div>
+    );
+  }
 
   if (!active) {
     return (
