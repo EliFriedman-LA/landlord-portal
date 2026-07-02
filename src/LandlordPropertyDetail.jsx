@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   getProperty, updateProperty, deleteProperty,
-  entities, loans, insurance, propertyTax, units, splits, registrations,
+  entities, loans, insurance, propertyTax, units, splits, registrations, acquisitionFunds,
   tenants, leases, listLeases, contacts, listPropertyContacts, assignContact, unassignContact,
 } from "./landlordProps.js";
 import { listDocs, uploadDoc, signedUrl, removeDoc, formatSize, DOC_CATEGORIES } from "./landlordDocs.js";
@@ -92,6 +92,14 @@ const REG = [
   { key: "authority", label: "Authority" }, { key: "number", label: "Number" },
   { key: "issue_date", label: "Issue date", type: "date" }, { key: "expiration_date", label: "Expiration date", type: "date" },
   { key: "renewal_url", label: "Renewal link", type: "url", full: true },
+  { key: "notes", label: "Notes", type: "textarea" },
+];
+const ACQ = [
+  { key: "purpose", label: "Purpose", placeholder: "LLC formation, deposit, closing…" },
+  { key: "entry_date", label: "Date", type: "date" },
+  { key: "amount", label: "Amount", type: "number" },
+  { key: "from_party", label: "From" },
+  { key: "to_party", label: "To" },
   { key: "notes", label: "Notes", type: "textarea" },
 ];
 const ENTITY = [
@@ -557,7 +565,7 @@ function DocumentsTab({ propertyId, accountId, notify }) {
 
 /* ------------------------------- main view ------------------------------- */
 const TABS = [
-  "Overview", "Entity / LLC", "Purchase", "Loan", "Leases & tenants",
+  "Overview", "Entity / LLC", "Purchase", "Cash invested", "Loan", "Leases & tenants",
   "Insurance", "Property tax", "Registrations", "Units", "Ownership", "Contacts", "Documents",
 ];
 
@@ -614,6 +622,8 @@ export default function LandlordPropertyDetail({ propertyId, membership, notify,
           <RecordForm fields={PURCHASE} record={prop} onSave={saveProp} saving={saving} />
         </div></div>
       )}
+      {tab === "Cash invested" && <ListTab api={acquisitionFunds} propertyId={propertyId} accountId={accountId} fields={ACQ} notify={notify}
+        summary={(r) => <><b>{money(r.amount)}</b><span className="hint"> · {r.purpose || "—"}{r.entry_date ? " · " + fmtDate(r.entry_date) : ""}</span></>} />}
       {tab === "Loan" && <div className="ll-card"><div className="pad"><SingleTab api={loans} propertyId={propertyId} accountId={accountId} fields={LOAN} notify={notify} /></div></div>}
       {tab === "Leases & tenants" && <LeasesTab propertyId={propertyId} accountId={accountId} notify={notify} />}
       {tab === "Insurance" && <div className="ll-card"><div className="pad"><SingleTab api={insurance} propertyId={propertyId} accountId={accountId} fields={INSURANCE} notify={notify} /></div></div>}

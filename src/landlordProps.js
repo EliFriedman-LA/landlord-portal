@@ -24,6 +24,7 @@ export const insurance     = crud("landlord_insurance");
 export const propertyTax   = crud("landlord_property_tax");
 export const registrations = crud("landlord_registrations");
 export const contacts      = crud("landlord_contacts");
+export const acquisitionFunds = crud("landlord_acquisition_funds");
 
 // ---- properties (with entity name for the list) -----------------------------
 export async function listProperties(accountId) {
