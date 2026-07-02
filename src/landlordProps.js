@@ -63,6 +63,16 @@ export async function listPropertyContacts(propertyId) {
 export const assignContact = (obj) => sb.from("landlord_property_contacts").insert(obj).select().single().then(ok);
 export const unassignContact = (id) => sb.from("landlord_property_contacts").delete().eq("id", id).then(okVoid);
 
+// contacts with the properties they're linked to
+export async function listContactsWithProps(accountId) {
+  return sb
+    .from("landlord_contacts")
+    .select("*, links:landlord_property_contacts(role, property:landlord_properties(id,label,full_address))")
+    .eq("account_id", accountId)
+    .order("name", { ascending: true })
+    .then(ok);
+}
+
 // documents (read only for now; uploads land in their own batch)
 export async function listDocuments(propertyId) {
   return sb
