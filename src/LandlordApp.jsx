@@ -7,6 +7,7 @@ import LandlordTeam from "./LandlordTeam.jsx";
 import LandlordDashboard from "./LandlordDashboard.jsx";
 import LandlordProperties from "./LandlordProperties.jsx";
 import LandlordFinancials from "./LandlordFinancials.jsx";
+import LandlordVault from "./LandlordVault.jsx";
 
 // ---- tiny inline icon set (20x20, stroke) ----
 const P = (d) => <path d={d} />;
@@ -191,9 +192,10 @@ export default function LandlordApp() {
         {view === "properties" && <LandlordProperties membership={active} notify={setToast} />}
         {view === "financials" && <LandlordFinancials membership={active} notify={setToast} initialTab="Income" />}
         {view === "bills" && <LandlordFinancials membership={active} notify={setToast} initialTab="Bills" />}
+        {view === "vault" && <LandlordVault membership={active} notify={setToast} />}
         {view === "team" && <LandlordTeam membership={active} notify={setToast} selfUserId={session.user?.id} />}
         {view === "settings" && <Placeholder label="Settings" />}
-        {current && !["dashboard", "properties", "financials", "bills", "team", "settings"].includes(view) && <Placeholder label={current.label} />}
+        {current && !["dashboard", "properties", "financials", "bills", "vault", "team", "settings"].includes(view) && <Placeholder label={current.label} />}
       </div>
 
       {toast && <div className="toast">{toast}</div>}
