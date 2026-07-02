@@ -3,8 +3,8 @@ import {
   getProperty, updateProperty, deleteProperty,
   entities, loans, insurance, propertyTax, units, splits, registrations,
   tenants, leases, listLeases, contacts, listPropertyContacts, assignContact, unassignContact,
-  listDocuments,
 } from "./landlordProps.js";
+import { listDocs, uploadDoc, signedUrl, removeDoc, formatSize, DOC_CATEGORIES } from "./landlordDocs.js";
 import { RecordForm, Field } from "./landlordForm.jsx";
 
 /* -------------------------------- schemas -------------------------------- */
@@ -457,6 +457,104 @@ function ContactsTab({ propertyId, accountId, notify }) {
   );
 }
 
+/* ----------------------------- documents tab ----------------------------- */
+function DocumentsTab({ propertyId, accountId, notify }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [category, setCategory] = useState("");
+  const [drag, setDrag] = useState(false);
+  const inputRef = React.useRef(null);
+
+  async function load() {
+    setLoading(true);
+    try { setDocs(await listDocs(propertyId)); }
+    catch (e) { notify(e.message || "Could not load documents"); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [propertyId]);
+
+  async function handleFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    setUploading(true);
+    let done = 0;
+    for (const f of files) {
+      try { await uploadDoc(accountId, propertyId, f, category); done++; }
+      catch (e) { notify(`${f.name}: ${e.message || "upload failed"}`); }
+    }
+    setUploading(false);
+    if (done) notify(done === 1 ? "Document uploaded" : `${done} documents uploaded`);
+    if (inputRef.current) inputRef.current.value = "";
+    load();
+  }
+
+  async function open(doc) {
+    try { const url = await signedUrl(doc.storage_path); window.open(url, "_blank", "noopener"); }
+    catch (e) { notify(e.message || "Could not open file"); }
+  }
+  async function del(doc) {
+    if (!confirm(`Delete "${doc.name}"?`)) return;
+    try { await removeDoc(doc); notify("Document deleted"); load(); }
+    catch (e) { notify(e.message || "Delete failed"); }
+  }
+
+  return (
+    <div>
+      <div className="ll-card" style={{ marginBottom: 16 }}><div className="pad">
+        <div className="row" style={{ alignItems: "flex-end", marginBottom: 12 }}>
+          <div style={{ minWidth: 200 }}>
+            <label className="fld">Category for uploads</label>
+            <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">— none —</option>
+              {DOC_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div
+          className={"dropzone" + (drag ? " over" : "")}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); handleFiles(e.dataTransfer.files); }}
+          onClick={() => inputRef.current?.click()}
+        >
+          <input ref={inputRef} type="file" multiple style={{ display: "none" }}
+            onChange={(e) => handleFiles(e.target.files)} />
+          {uploading
+            ? <span>Uploading…</span>
+            : <span><b>Click to choose files</b> or drag &amp; drop here{category ? <> · tagged <b>{category}</b></> : ""}</span>}
+        </div>
+      </div></div>
+
+      {loading ? (
+        <div className="hint">Loading…</div>
+      ) : docs.length === 0 ? (
+        <div className="hint">No documents yet. Closing documents and the title policy will also land here automatically from your Lakeland closing.</div>
+      ) : (
+        <div className="mini-list">
+          {docs.map((d) => (
+            <div className="item" key={d.id}>
+              <div style={{ minWidth: 0 }}>
+                <b style={{ wordBreak: "break-word" }}>{d.name}</b>
+                <div className="hint">
+                  {d.category ? d.category + " · " : ""}{formatSize(d.size_bytes)}
+                  {d.size_bytes ? " · " : ""}{fmtDate((d.created_at || "").slice(0, 10))}
+                  {d.source === "title_import" ? " · from closing" : ""}
+                </div>
+              </div>
+              <div style={{ whiteSpace: "nowrap" }}>
+                <button className="btn ghost sm" onClick={() => open(d)}>Open</button>{" "}
+                <button className="btn danger sm" onClick={() => del(d)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------- main view ------------------------------- */
 const TABS = [
   "Overview", "Entity / LLC", "Purchase", "Loan", "Leases & tenants",
@@ -527,12 +625,7 @@ export default function LandlordPropertyDetail({ propertyId, membership, notify,
       {tab === "Ownership" && <ListTab api={splits} propertyId={propertyId} accountId={accountId} fields={SPLIT} notify={notify}
         summary={(r) => <><b>{r.partner_name}</b><span className="hint"> · {r.pct_after ?? r.pct_prior ?? "?"}%{r.is_iska ? " · iska" : ""}</span></>} />}
       {tab === "Contacts" && <ContactsTab propertyId={propertyId} accountId={accountId} notify={notify} />}
-      {tab === "Documents" && (
-        <div className="ll-card"><div className="pad empty">
-          <div className="big">Document vault</div>
-          <div className="hint">Uploads arrive in the next build. Closing documents and the title policy will land here automatically from your Lakeland closing.</div>
-        </div></div>
-      )}
+      {tab === "Documents" && <DocumentsTab propertyId={propertyId} accountId={accountId} notify={notify} />}
     </div>
   );
 }

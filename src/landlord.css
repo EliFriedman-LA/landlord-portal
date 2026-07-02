@@ -171,3 +171,8 @@ table.ll-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .modal { background: #fff; border-radius: 14px; max-width: 640px; width: 100%; max-height: 90vh; overflow: auto; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
 .modal .mh { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: #fff; }
 .modal .mb { padding: 20px; }
+
+/* ---------- dropzone (Batch 4) ---------- */
+.dropzone { border: 2px dashed var(--line); border-radius: 12px; padding: 26px 18px; text-align: center; color: var(--muted); font-size: 14px; cursor: pointer; background: #fbfdff; transition: border-color .15s, background .15s; }
+.dropzone:hover { border-color: var(--bl); background: var(--bl-soft); }
+.dropzone.over { border-color: var(--bl); background: var(--bl-soft); color: var(--nv); }
