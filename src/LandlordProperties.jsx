@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { listProperties, createProperty } from "./landlordProps.js";
+import { listProperties, createProperty, mergeTitleImport, dismissReview } from "./landlordProps.js";
 import { RecordForm } from "./landlordForm.jsx";
 import LandlordPropertyDetail from "./LandlordPropertyDetail.jsx";
 
@@ -60,6 +60,19 @@ export default function LandlordProperties({ membership, notify }) {
     finally { setSaving(false); }
   }
 
+  async function mergeOne(p) {
+    try { await mergeTitleImport(p); notify("Merged into your existing property"); reload(); }
+    catch (e) { notify(e.message || "Could not merge"); }
+  }
+  async function keepSeparate(p) {
+    try { await dismissReview(p.id); notify("Kept as a separate property"); reload(); }
+    catch (e) { notify(e.message || "Could not update"); }
+  }
+
+  const pending = rows.filter((p) => p.review_status === "pending");
+  const normal = rows.filter((p) => p.review_status !== "pending");
+  const nameOf = (id) => { const m = rows.find((r) => r.id === id); return m ? (m.label || m.full_address || "your property") : "your property"; };
+
   if (openId) {
     return (
       <LandlordPropertyDetail
@@ -74,13 +87,29 @@ export default function LandlordProperties({ membership, notify }) {
   return (
     <div className="ll-content">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div className="hint">{rows.length} {rows.length === 1 ? "property" : "properties"}</div>
+        <div className="hint">{normal.length} {normal.length === 1 ? "property" : "properties"}</div>
         <button className="btn blue" onClick={() => setAdding(true)}>+ Add property</button>
       </div>
 
+      {pending.map((p) => (
+        <div key={p.id} className="ll-card" style={{ marginBottom: 12, borderLeft: "4px solid var(--warn)" }}>
+          <div className="pad">
+            <div style={{ fontWeight: 700, color: "var(--nv)" }}>Imported from your Lakeland closing</div>
+            <div style={{ margin: "4px 0 10px" }}>
+              <b>{p.full_address || p.label}</b> looks like it matches a property you already have
+              {p.matched_property_id ? <> — <b>{nameOf(p.matched_property_id)}</b></> : ""}. Merge them, or keep this as a separate property?
+            </div>
+            <div className="row">
+              <button className="btn blue" onClick={() => mergeOne(p)}>Merge into existing</button>
+              <button className="btn ghost" onClick={() => keepSeparate(p)}>Keep separate</button>
+            </div>
+          </div>
+        </div>
+      ))}
+
       {loading ? (
         <div className="ll-card"><div className="pad hint">Loading…</div></div>
-      ) : rows.length === 0 ? (
+      ) : normal.length === 0 && pending.length === 0 ? (
         <div className="ll-card"><div className="pad empty">
           <div className="big">No properties yet</div>
           <div className="hint">Add your first property, or one will appear automatically when a Lakeland closing funds.</div>
@@ -88,7 +117,7 @@ export default function LandlordProperties({ membership, notify }) {
         </div></div>
       ) : (
         <div className="ll-grid cols">
-          {rows.map((p) => (
+          {normal.map((p) => (
             <button key={p.id} className="ll-card prop-card" onClick={() => setOpenId(p.id)}>
               <div className="pad">
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>

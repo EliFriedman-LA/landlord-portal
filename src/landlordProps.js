@@ -41,6 +41,28 @@ export const getProperty = (id) =>
 export const updateProperty = (id, patch) => sb.from("landlord_properties").update(patch).eq("id", id).select().single().then(ok);
 export const deleteProperty = (id) => sb.from("landlord_properties").delete().eq("id", id).then(okVoid);
 
+// Resolve a title-import that matched an existing property.
+// Merge: move the imported docs onto the existing property, fill in any blank
+// fields, repoint the title link, then remove the placeholder card.
+export async function mergeTitleImport(placeholder) {
+  const matchedId = placeholder.matched_property_id;
+  if (!matchedId) throw new Error("Nothing to merge into");
+  await sb.from("landlord_documents").update({ property_id: matchedId }).eq("property_id", placeholder.id);
+  const matched = await getProperty(matchedId);
+  const patch = {};
+  ["county", "block", "lot", "parcel_id", "purchase_price", "acquired_date", "full_address", "city", "state", "zip", "notes"].forEach((k) => {
+    const cur = matched[k];
+    const inc = placeholder[k];
+    if ((cur === null || cur === undefined || cur === "") && inc !== null && inc !== undefined && inc !== "") patch[k] = inc;
+  });
+  if (Object.keys(patch).length) await updateProperty(matchedId, patch);
+  await sb.from("landlord_title_links").update({ property_id: matchedId }).eq("property_id", placeholder.id);
+  await deleteProperty(placeholder.id);
+  return matchedId;
+}
+// Keep separate: it's a real property of its own.
+export const dismissReview = (id) => updateProperty(id, { review_status: null, matched_property_id: null });
+
 // leases with tenant + unit labels
 export async function listLeases(propertyId) {
   return sb
