@@ -1,8 +1,35 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { getDashboardStats } from "./landlordProps.js";
+import { getUpcoming } from "./landlordTasks.js";
 
 export default function LandlordDashboard({ membership, nav, onOpen }) {
+  const accountId = membership.account_id;
   const acct = membership.account?.name || "Your account";
-  const modules = nav.filter((n) => !["dashboard", "team", "settings"].includes(n.key));
+  const modules = nav.filter((n) => !["dashboard"].includes(n.key));
+  const [stats, setStats] = useState(null);
+  const [dueSoon, setDueSoon] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getDashboardStats(accountId);
+        if (!cancelled) setStats(s);
+      } catch { if (!cancelled) setStats({ properties: 0, leases: 0, openTasks: 0 }); }
+      try {
+        const up = await getUpcoming(accountId);
+        const today = new Date().toISOString().slice(0, 10);
+        const soon = up.filter((i) => {
+          const d = Math.round((new Date(i.date + "T00:00:00") - new Date(today + "T00:00:00")) / 86400000);
+          return d <= 30;
+        }).length;
+        if (!cancelled) setDueSoon(soon);
+      } catch { if (!cancelled) setDueSoon(0); }
+    })();
+    return () => { cancelled = true; };
+  }, [accountId]);
+
+  const v = (n) => (n === null || n === undefined ? "—" : n);
 
   return (
     <div className="ll-content">
@@ -11,15 +38,14 @@ export default function LandlordDashboard({ membership, nav, onOpen }) {
           <div>
             <h3 style={{ fontSize: 18, marginBottom: 2 }}>{acct}</h3>
             <div className="hint">
-              {membership.role === "owner"
-                ? "You have full access to this account."
-                : "You have access to the areas below."}
+              {membership.role === "owner" ? "You have full access to this account." : "You have access to the areas below."}
             </div>
           </div>
           <div className="row">
-            <Stat label="Properties" value="—" />
-            <Stat label="Active leases" value="—" />
-            <Stat label="Open tasks" value="—" />
+            <Stat label="Properties" value={v(stats?.properties)} onClick={() => onOpen("properties")} />
+            <Stat label="Active leases" value={v(stats?.leases)} onClick={() => onOpen("properties")} />
+            <Stat label="Open tasks" value={v(stats?.openTasks)} onClick={() => onOpen("tasks")} />
+            <Stat label="Due in 30 days" value={v(dueSoon)} onClick={() => onOpen("tasks")} highlight={dueSoon > 0} />
           </div>
         </div>
       </div>
@@ -37,26 +63,22 @@ export default function LandlordDashboard({ membership, nav, onOpen }) {
         <div className="ll-grid cols">
           {modules.map((m) => (
             <button key={m.key} className="ll-card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)", background: "#fff" }} onClick={() => onOpen(m.key)}>
-              <div className="pad">
-                <h3>{m.label}</h3>
-                <div className="hint">Setting up — available in the next build.</div>
+              <div className="pad" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0 }}>{m.label}</h3>
+                <span className="hint">Open →</span>
               </div>
             </button>
           ))}
         </div>
       )}
-
-      <div className="note" style={{ marginTop: 20 }}>
-        The foundation is live. Properties, ledgers, the vault and the rest fill in over the next builds — everything you can see here is already permission-gated to you.
-      </div>
     </div>
   );
 }
 
-function Stat({ label, value }) {
+function Stat({ label, value, onClick, highlight }) {
   return (
-    <div style={{ textAlign: "center", minWidth: 84 }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: "var(--nv)" }}>{value}</div>
+    <div onClick={onClick} style={{ textAlign: "center", minWidth: 88, cursor: onClick ? "pointer" : "default" }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? "var(--warn)" : "var(--nv)" }}>{value}</div>
       <div className="hint">{label}</div>
     </div>
   );

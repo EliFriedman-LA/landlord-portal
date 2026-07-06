@@ -63,6 +63,42 @@ export async function mergeTitleImport(placeholder) {
 // Keep separate: it's a real property of its own.
 export const dismissReview = (id) => updateProperty(id, { review_status: null, matched_property_id: null });
 
+// Dashboard counts for an account.
+export async function getDashboardStats(accountId) {
+  const today = new Date().toISOString().slice(0, 10);
+  const head = { count: "exact", head: true };
+  const [props, leases, tasks] = await Promise.all([
+    sb.from("landlord_properties").select("id", head).eq("account_id", accountId).is("review_status", null),
+    sb.from("landlord_leases").select("id", head).eq("account_id", accountId).or(`end_date.is.null,end_date.gte.${today}`),
+    sb.from("landlord_tasks").select("id", head).eq("account_id", accountId).eq("status", "open"),
+  ]);
+  return { properties: props.count || 0, leases: leases.count || 0, openTasks: tasks.count || 0 };
+}
+
+// General merge: move every child record + documents onto `toId`, fill blanks,
+// repoint the title link, then delete the source property.
+export async function mergeProperties(fromId, toId) {
+  if (!fromId || !toId || fromId === toId) throw new Error("Pick a different property to merge into");
+  const childTables = [
+    "landlord_units", "landlord_ownership_splits", "landlord_loans", "landlord_tenants",
+    "landlord_leases", "landlord_insurance", "landlord_property_tax", "landlord_registrations",
+    "landlord_acquisition_funds", "landlord_income", "landlord_expenses", "landlord_bill_allocations",
+    "landlord_property_contacts", "landlord_tasks", "landlord_reminders", "landlord_documents",
+    "landlord_credentials", "landlord_title_links",
+  ];
+  for (const t of childTables) {
+    try { await sb.from(t).update({ property_id: toId }).eq("property_id", fromId); } catch (e) { /* table may not carry property_id */ }
+  }
+  const [from, to] = await Promise.all([getProperty(fromId), getProperty(toId)]);
+  const patch = {};
+  ["county", "block", "lot", "parcel_id", "purchase_price", "acquired_date", "full_address", "city", "state", "zip", "notes", "property_type", "entity_id"].forEach((k) => {
+    if ((to[k] === null || to[k] === undefined || to[k] === "") && from[k] !== null && from[k] !== undefined && from[k] !== "") patch[k] = from[k];
+  });
+  if (Object.keys(patch).length) await updateProperty(toId, patch);
+  await deleteProperty(fromId);
+  return toId;
+}
+
 // leases with tenant + unit labels
 export async function listLeases(propertyId) {
   return sb

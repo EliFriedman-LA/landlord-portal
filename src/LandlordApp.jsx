@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  getSession, onAuthChange, signOut, loadMemberships, redeemInvite, can,
+  getSession, onAuthChange, signOut, loadMemberships, redeemInvite, can, changePassword,
 } from "./landlordDb.js";
 import LandlordLogin from "./LandlordLogin.jsx";
 import LandlordTeam from "./LandlordTeam.jsx";
@@ -11,6 +11,8 @@ import LandlordVault from "./LandlordVault.jsx";
 import LandlordTasks from "./LandlordTasks.jsx";
 import LandlordContacts from "./LandlordContacts.jsx";
 import LandlordAcquisitions from "./LandlordAcquisitions.jsx";
+import LandlordDocuments from "./LandlordDocuments.jsx";
+import LandlordSettings from "./LandlordSettings.jsx";
 
 // ---- tiny inline icon set (20x20, stroke) ----
 const P = (d) => <path d={d} />;
@@ -56,6 +58,31 @@ function Placeholder({ label }) {
         <div className="hint">This module arrives in the next build. The database and your permissions for it are already in place.</div>
       </div></div>
     </div>
+  );
+}
+
+function ForcePasswordChange({ notify, onDone, onSignOut }) {
+  const [pw, setPw] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  async function save() {
+    if (pw.length < 8) { notify("Use at least 8 characters"); return; }
+    if (pw !== confirm) { notify("Passwords don't match"); return; }
+    setBusy(true);
+    try { await changePassword(pw); notify("Password updated"); await onDone(); }
+    catch (e) { notify(e.message || "Could not update password"); setBusy(false); }
+  }
+  return (
+    <div className="ll-login"><div className="box">
+      <div className="logo"><img src="/icon-192.png" alt="" /><h2>Landlord Portal</h2></div>
+      <p className="sub">Set a new password to finish setting up your account.</p>
+      <label className="fld">New password</label>
+      <input className="input" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+      <label className="fld" style={{ marginTop: 12 }}>Confirm password</label>
+      <input className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+      <button className="btn blue" style={{ width: "100%", marginTop: 16 }} disabled={busy} onClick={save}>{busy ? "Saving…" : "Set password & continue"}</button>
+      <button className="linklike" style={{ marginTop: 14 }} onClick={onSignOut}>Sign out</button>
+    </div></div>
   );
 }
 
@@ -133,6 +160,12 @@ export default function LandlordApp() {
 
   const active = memberships.find((m) => m.account_id === activeId) || memberships[0] || null;
 
+  async function reloadMemberships() {
+    const ms = await loadMemberships();
+    setMemberships(ms);
+    setActiveId((prev) => prev || ms[0]?.account_id || null);
+  }
+
   async function acceptInvite() {
     setConfirmInvite(false);
     setLoadingM(true);
@@ -176,6 +209,10 @@ export default function LandlordApp() {
         <button className="btn ghost" style={{ marginTop: 10 }} onClick={() => signOut()}>Sign out</button>
       </div></div>
     );
+  }
+
+  if (active && active.mustChangePassword) {
+    return <ForcePasswordChange notify={setToast} onDone={reloadMemberships} onSignOut={() => signOut()} />;
   }
 
   if (!active) {
@@ -242,9 +279,10 @@ export default function LandlordApp() {
         {view === "tasks" && <LandlordTasks membership={active} notify={setToast} />}
         {view === "contacts" && <LandlordContacts membership={active} notify={setToast} />}
         {view === "deals" && <LandlordAcquisitions membership={active} notify={setToast} />}
+        {view === "documents" && <LandlordDocuments membership={active} notify={setToast} />}
         {view === "team" && <LandlordTeam membership={active} notify={setToast} selfUserId={session.user?.id} />}
-        {view === "settings" && <Placeholder label="Settings" />}
-        {current && !["dashboard", "properties", "financials", "bills", "vault", "tasks", "contacts", "deals", "team", "settings"].includes(view) && <Placeholder label={current.label} />}
+        {view === "settings" && <LandlordSettings membership={active} notify={setToast} onAccountRenamed={reloadMemberships} />}
+        {current && !["dashboard", "properties", "financials", "bills", "vault", "tasks", "contacts", "deals", "documents", "team", "settings"].includes(view) && <Placeholder label={current.label} />}
       </div>
 
       {toast && <div className="toast">{toast}</div>}

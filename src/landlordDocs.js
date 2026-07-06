@@ -26,6 +26,16 @@ export async function listDocs(propertyId) {
     .then(ok);
 }
 
+// All documents across the account, with the property they belong to.
+export async function listAllDocs(accountId) {
+  return sb
+    .from("landlord_documents")
+    .select("*, property:landlord_properties(id,label,full_address)")
+    .eq("account_id", accountId)
+    .order("created_at", { ascending: false })
+    .then(ok);
+}
+
 export async function uploadDoc(accountId, propertyId, file, category) {
   const path = `${accountId}/${propertyId}/${Date.now()}-${safeName(file.name)}`;
 

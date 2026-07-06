@@ -40,6 +40,27 @@ export async function sendMagicLink(email) {
   });
 }
 
+// Credential login: Company ID + User ID + password -> session (no email shown).
+export async function signInWithCredentials(companyCode, username, password) {
+  const r = await fetch("/api/landlord-auth", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company_code: companyCode, username, password }),
+  });
+  const d = await r.json().catch(() => ({ ok: false, error: "Sign-in failed" }));
+  if (!r.ok || !d.ok) throw new Error(d.error || "Sign-in failed");
+  const { error } = await db.auth.setSession({ access_token: d.access_token, refresh_token: d.refresh_token });
+  if (error) throw error;
+  return { mustChangePassword: !!d.must_change_password };
+}
+
+// Set a new password for the signed-in user, then clear the must-change flag.
+export async function changePassword(newPassword) {
+  const { error } = await db.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+  await db.rpc("landlord_clear_pw_flag");
+}
+
 export async function signOut() {
   return db.auth.signOut();
 }
@@ -50,7 +71,7 @@ export async function signOut() {
 export async function loadMemberships() {
   const { data, error } = await db
     .from("landlord_members")
-    .select("id, account_id, role, permissions, account:landlord_accounts(id, name, logo_path, status)")
+    .select("id, account_id, role, permissions, username, must_change_password, account:landlord_accounts(id, name, logo_path, status, company_code)")
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data || []).map((m) => ({
@@ -58,6 +79,8 @@ export async function loadMemberships() {
     account_id: m.account_id,
     role: m.role,
     permissions: m.permissions || {},
+    username: m.username,
+    mustChangePassword: !!m.must_change_password,
     account: m.account,
   }));
 }
@@ -121,6 +144,33 @@ export async function removeMember(memberId) {
 export async function updateAccount(accountId, patch) {
   const { error } = await db.from("landlord_accounts").update(patch).eq("id", accountId);
   if (error) throw error;
+}
+
+// Owner creates a team User ID + password (service-side, via endpoint).
+export async function createTeamUser(accountId, { username, password, role, permissions, display_name }) {
+  const { data: sess } = await db.auth.getSession();
+  const token = sess?.session?.access_token;
+  const r = await fetch("/api/landlord-team", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: "create-user", account_id: accountId, username, password, role, permissions, display_name }),
+  });
+  const d = await r.json().catch(() => ({ ok: false, error: "Failed" }));
+  if (!r.ok || !d.ok) throw new Error(d.error || "Could not create user");
+  return d; // { username, temp_password }
+}
+
+export async function resetTeamPassword(accountId, memberId, password) {
+  const { data: sess } = await db.auth.getSession();
+  const token = sess?.session?.access_token;
+  const r = await fetch("/api/landlord-team", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: "reset-password", account_id: accountId, member_id: memberId, password }),
+  });
+  const d = await r.json().catch(() => ({ ok: false, error: "Failed" }));
+  if (!r.ok || !d.ok) throw new Error(d.error || "Could not reset password");
+  return d; // { username, temp_password }
 }
 
 // ---------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  getProperty, updateProperty, deleteProperty,
+  getProperty, updateProperty, deleteProperty, listProperties, mergeProperties,
   entities, loans, insurance, propertyTax, units, splits, registrations, acquisitionFunds,
   tenants, leases, listLeases, contacts, listPropertyContacts, assignContact, unassignContact,
 } from "./landlordProps.js";
@@ -574,6 +574,28 @@ export default function LandlordPropertyDetail({ propertyId, membership, notify,
   const [prop, setProp] = useState(null);
   const [tab, setTab] = useState("Overview");
   const [saving, setSaving] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [others, setOthers] = useState([]);
+  const [mergeTarget, setMergeTarget] = useState("");
+  const [merging, setMerging] = useState(false);
+
+  async function openMerge() {
+    try {
+      const all = await listProperties(accountId);
+      setOthers(all.filter((p) => p.id !== propertyId && p.review_status !== "pending"));
+      setMergeTarget(""); setMergeOpen(true);
+    } catch (e) { notify(e.message || "Could not load properties"); }
+  }
+  async function doMerge() {
+    if (!mergeTarget) { notify("Pick a property to merge into"); return; }
+    setMerging(true);
+    try {
+      await mergeProperties(propertyId, mergeTarget);
+      notify("Properties merged");
+      setMergeOpen(false); onBack();
+    } catch (e) { notify(e.message || "Merge failed"); }
+    finally { setMerging(false); }
+  }
 
   async function load() {
     try { setProp(await getProperty(propertyId)); }
@@ -603,8 +625,34 @@ export default function LandlordPropertyDetail({ propertyId, membership, notify,
           <h2 style={{ margin: 0, color: "var(--nv)" }}>{prop.label || prop.full_address || "Property"}</h2>
           {prop.full_address && prop.label && <div className="hint">{prop.full_address}</div>}
         </div>
-        <span className={"badge " + (prop.status === "active" ? "owner" : prop.status === "sold" ? "member" : "pending")}>{prop.status}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button className="btn ghost sm" onClick={openMerge}>Merge into…</button>
+          <span className={"badge " + (prop.status === "active" ? "owner" : prop.status === "sold" ? "member" : "pending")}>{prop.status}</span>
+        </div>
       </div>
+
+      {mergeOpen && (
+        <div className="modal-bg" onClick={() => !merging && setMergeOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mh"><b>Merge this property into another</b><button className="btn ghost sm" onClick={() => setMergeOpen(false)}>Close</button></div>
+            <div className="mb">
+              <div className="hint" style={{ marginBottom: 10 }}>
+                All records and documents from <b>{prop.label || prop.full_address}</b> move to the property you choose, and this one is removed. This can't be undone.
+              </div>
+              <label className="fld">Merge into</label>
+              <select className="select" value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)}>
+                <option value="">Select a property…</option>
+                {others.map((p) => <option key={p.id} value={p.id}>{p.label || p.full_address || "Property"}</option>)}
+              </select>
+              {others.length === 0 && <div className="hint" style={{ marginTop: 8 }}>No other properties to merge into.</div>}
+              <div className="row" style={{ marginTop: 14 }}>
+                <button className="btn blue" disabled={merging || !mergeTarget} onClick={doMerge}>{merging ? "Merging…" : "Merge properties"}</button>
+                <button className="btn ghost" onClick={() => setMergeOpen(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="tabs">
         {TABS.map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}
