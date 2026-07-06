@@ -13,6 +13,7 @@ import LandlordContacts from "./LandlordContacts.jsx";
 import LandlordAcquisitions from "./LandlordAcquisitions.jsx";
 import LandlordDocuments from "./LandlordDocuments.jsx";
 import LandlordSettings from "./LandlordSettings.jsx";
+import { pwValid, friendlyPwError, PasswordChecklist } from "./PasswordFields.jsx";
 
 // ---- tiny inline icon set (20x20, stroke) ----
 const P = (d) => <path d={d} />;
@@ -65,12 +66,13 @@ function ForcePasswordChange({ notify, onDone, onSignOut }) {
   const [pw, setPw] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const ready = pwValid(pw) && pw === confirm;
   async function save() {
-    if (pw.length < 8) { notify("Use at least 8 characters"); return; }
+    if (!pwValid(pw)) { notify("Password doesn't meet the requirements yet"); return; }
     if (pw !== confirm) { notify("Passwords don't match"); return; }
     setBusy(true);
     try { await changePassword(pw); notify("Password updated"); await onDone(); }
-    catch (e) { notify(e.message || "Could not update password"); setBusy(false); }
+    catch (e) { notify(friendlyPwError(e.message)); setBusy(false); }
   }
   return (
     <div className="ll-login"><div className="box">
@@ -78,9 +80,11 @@ function ForcePasswordChange({ notify, onDone, onSignOut }) {
       <p className="sub">Set a new password to finish setting up your account.</p>
       <label className="fld">New password</label>
       <input className="input" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+      <PasswordChecklist value={pw} />
       <label className="fld" style={{ marginTop: 12 }}>Confirm password</label>
-      <input className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
-      <button className="btn blue" style={{ width: "100%", marginTop: 16 }} disabled={busy} onClick={save}>{busy ? "Saving…" : "Set password & continue"}</button>
+      <input className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ready && save()} />
+      {confirm && pw !== confirm && <div style={{ color: "var(--danger)", fontSize: 12.5, marginTop: 6 }}>Passwords don't match</div>}
+      <button className="btn blue" style={{ width: "100%", marginTop: 16 }} disabled={busy || !ready} onClick={save}>{busy ? "Saving…" : "Set password & continue"}</button>
       <button className="linklike" style={{ marginTop: 14 }} onClick={onSignOut}>Sign out</button>
     </div></div>
   );

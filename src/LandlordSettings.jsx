@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { updateAccount, changePassword } from "./landlordDb.js";
+import { pwValid, friendlyPwError, PasswordChecklist } from "./PasswordFields.jsx";
 
 export default function LandlordSettings({ membership, notify, onAccountRenamed }) {
   const isOwner = membership.role === "owner";
@@ -17,11 +18,11 @@ export default function LandlordSettings({ membership, notify, onAccountRenamed 
     finally { setSavingName(false); }
   }
   async function savePw() {
-    if (pw.length < 8) { notify("Use at least 8 characters"); return; }
+    if (!pwValid(pw)) { notify("Password doesn't meet the requirements yet"); return; }
     if (pw !== confirm) { notify("Passwords don't match"); return; }
     setSavingPw(true);
     try { await changePassword(pw); setPw(""); setConfirm(""); notify("Password updated"); }
-    catch (e) { notify(e.message || "Could not update password"); }
+    catch (e) { notify(friendlyPwError(e.message)); }
     finally { setSavingPw(false); }
   }
 
@@ -54,7 +55,9 @@ export default function LandlordSettings({ membership, notify, onAccountRenamed 
           <div><label className="fld">New password</label><input className="input" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></div>
           <div><label className="fld">Confirm password</label><input className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></div>
         </div>
-        <button className="btn blue" style={{ marginTop: 12 }} disabled={savingPw} onClick={savePw}>{savingPw ? "Saving…" : "Update password"}</button>
+        {pw && <PasswordChecklist value={pw} />}
+        {confirm && pw !== confirm && <div style={{ color: "var(--danger)", fontSize: 12.5, marginTop: 6 }}>Passwords don't match</div>}
+        <button className="btn blue" style={{ marginTop: 12 }} disabled={savingPw || !pwValid(pw) || pw !== confirm} onClick={savePw}>{savingPw ? "Saving…" : "Update password"}</button>
       </div></div>
     </div>
   );
