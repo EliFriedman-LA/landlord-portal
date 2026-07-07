@@ -63,6 +63,20 @@ export function RecordForm({ fields, record, onSave, saving, saveLabel = "Save",
   useEffect(() => { setDraft(record || {}); }, [record]);
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
+  // Submit ONLY the keys this form actually manages. The seeded `record` can
+  // carry joined relations (properties embed `entity`; leases embed `tenant`
+  // and `unit`) and read-only columns (id, account_id, created_at). Sending
+  // those back on an update makes PostgREST reject the request with a 400
+  // ("column ... does not exist"). Callers inject account_id/property_id
+  // themselves, so scoping to field keys is safe for create flows too.
+  const submit = () => {
+    const payload = {};
+    fields.forEach((f) => {
+      if (draft[f.key] !== undefined) payload[f.key] = draft[f.key];
+    });
+    onSave(payload);
+  };
+
   return (
     <div>
       <div className="form-grid">
@@ -71,7 +85,7 @@ export function RecordForm({ fields, record, onSave, saving, saveLabel = "Save",
         ))}
       </div>
       <div className="row" style={{ marginTop: 16 }}>
-        <button className="btn blue" disabled={saving} onClick={() => onSave(draft)}>
+        <button className="btn blue" disabled={saving} onClick={submit}>
           {saving ? "Saving…" : saveLabel}
         </button>
         {extraButtons}
