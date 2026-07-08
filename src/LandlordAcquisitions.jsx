@@ -192,16 +192,26 @@ function Pipeline({ accountId, notify, properties, contacts }) {
 }
 
 /* -------------------------------- analyzer ------------------------------- */
-const A_FIELDS = [
+const COMMON_TOP = [
   { key: "purchase_price", label: "Purchase price" },
   { key: "rehab_cost", label: "Rehab cost" },
   { key: "closing_cost", label: "Closing / acquisition costs" },
+];
+const PURCHASE_FIN = [
+  { key: "down_payment_pct", label: "Down payment %" },
+  { key: "purchase_loan_amount", label: "Loan amount ($, overrides %)" },
+  { key: "rate", label: "Interest rate %" },
+  { key: "amort_years", label: "Amortization (years)" },
+];
+const BRRRR_FIN = [
   { key: "arv", label: "After-repair value (ARV)" },
   { key: "refi_ltv", label: "Refi LTV %" },
   { key: "rate", label: "Interest rate %" },
   { key: "amort_years", label: "Amortization (years)" },
   { key: "loan_payoff", label: "Existing loan payoff" },
   { key: "refi_cost", label: "Refi closing costs" },
+];
+const COMMON_BOTTOM = [
   { key: "monthly_rent", label: "Monthly rent" },
   { key: "annual_taxes", label: "Annual property tax" },
   { key: "annual_insurance", label: "Annual insurance" },
@@ -211,9 +221,10 @@ const A_FIELDS = [
   { key: "reserve_months", label: "Reserve (months of PITI)" },
   { key: "owner_draw_monthly", label: "Owner draw / mo (profit first)" },
 ];
+const FIELDS_FOR = (mode) => [...COMMON_TOP, ...(mode === "brrrr" ? BRRRR_FIN : PURCHASE_FIN), ...COMMON_BOTTOM];
 
 function Analyzer({ accountId, notify, properties }) {
-  const [inp, setInp] = useState({ refi_ltv: 75, rate: 7.25, amort_years: 30, exit_cost_pct: 8, reserve_months: 2, interest_only: false, splits: [] });
+  const [inp, setInp] = useState({ financing_mode: "purchase", down_payment_pct: 20, refi_ltv: 75, rate: 7.25, amort_years: 30, exit_cost_pct: 8, reserve_months: 2, interest_only: false, splits: [] });
   const [saved, setSaved] = useState([]);
   const [label, setLabel] = useState("");
   const [prefillId, setPrefillId] = useState("");
@@ -277,11 +288,20 @@ function Analyzer({ accountId, notify, properties }) {
               </select>
             </div>
           )}
+          <div style={{ marginBottom: 12 }}>
+            <label className="fld">Financing</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[["purchase", "Financed purchase"], ["brrrr", "BRRRR / refinance"]].map(([k, l]) => (
+                <button key={k} type="button" className={"btn sm " + ((inp.financing_mode || "purchase") === k ? "blue" : "ghost")} onClick={() => set("financing_mode", k)}>{l}</button>
+              ))}
+            </div>
+            <div className="hint" style={{ marginTop: 4 }}>{(inp.financing_mode || "purchase") === "brrrr" ? "Loan comes from the refinance (ARV x refi LTV)." : "Enter a down payment % (or a loan amount) to get the purchase mortgage."}</div>
+          </div>
           <label className="chk" style={{ margin: "6px 0 12px" }}>
             <input type="checkbox" checked={!!inp.interest_only} onChange={(e) => set("interest_only", e.target.checked)} /> Interest-only loan (DSCR)
           </label>
           <div className="form-grid">
-            {A_FIELDS.map((f) => (
+            {FIELDS_FOR((inp.financing_mode === "brrrr") ? "brrrr" : "purchase").map((f) => (
               <div key={f.key}>
                 <label className="fld">{f.label}</label>
                 <input className="input" type="number" value={inp[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)} />
@@ -327,15 +347,17 @@ function Analyzer({ accountId, notify, properties }) {
           <Result label="NOI (annual)" value={money(out.noi)} />
           <Result label="Cap rate" value={out.capRate ? out.capRate.toFixed(1) + "%" : "—"} color={capColor} />
           <Result label="1% rule (rent / price)" value={out.onePct ? out.onePct.toFixed(2) + "%" : "—"} color={onePctColor} />
-          <Result label="Refinance loan" value={money(out.refiLoan)} />
+          {out.mode === "brrrr"
+            ? <Result label="Refinance loan" value={money(out.refiLoan)} />
+            : <><Result label="Loan amount" value={money(out.loanAmount)} /><Result label="Down payment" value={money(out.downPayment)} /></>}
           <Result label="Monthly P&I" value={money(out.pi)} />
           <Result label="PITI" value={money(out.piti)} />
           <Result label="DSCR" value={out.dscr ? out.dscr.toFixed(2) : "—"} color={dscrColor} />
           <Result label="Monthly cash flow" value={money(out.monthlyCF)} color={cfColor} />
           {out.ownerDraw > 0 && <Result label="After owner draw / mo" value={money(out.netMonthlyCF)} color={netCfColor} />}
           <Result label="Annual cash flow" value={money(out.annualCF)} color={cfColor} />
-          <Result label="Cash out on refi" value={money(out.cashReturned)} />
-          <Result label="Cash left in deal" value={out.cashLeftIn <= 0 ? "$0 (all out)" : money(out.cashLeftIn)} />
+          {out.mode === "brrrr" && <Result label="Cash out on refi" value={money(out.cashReturned)} />}
+          <Result label={out.mode === "brrrr" ? "Cash left in deal" : "Cash invested"} value={out.cashLeftIn <= 0 ? "$0 (all out)" : money(out.cashLeftIn)} />
           {out.reserves > 0 && <Result label="Reserves set aside" value={money(out.reserves)} />}
           <Result label="Total cash needed" value={money(out.totalCashNeeded)} />
           <Result label="Cash-on-cash" value={out.coc === null ? "∞ (no cash left in)" : out.coc.toFixed(1) + "%"} />
@@ -416,14 +438,8 @@ export default function LandlordAcquisitions({ membership, notify }) {
 
   return (
     <div className="ll-content">
-      <div className="tabs">
-        {["Pipeline", "Deal analyzer"].map((t) => (
-          <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>
-        ))}
-      </div>
-      {!ready ? <div className="hint">Loading…</div> : tab === "Pipeline"
-        ? <Pipeline accountId={accountId} notify={notify} properties={properties} contacts={contacts} />
-        : <Analyzer accountId={accountId} notify={notify} properties={properties} />}
+      {!ready ? <div className="hint">Loading…</div>
+        : <Pipeline accountId={accountId} notify={notify} properties={properties} contacts={contacts} />}
     </div>
   );
 }

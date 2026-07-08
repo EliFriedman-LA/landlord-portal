@@ -11,6 +11,7 @@ import LandlordVault from "./LandlordVault.jsx";
 import LandlordTasks from "./LandlordTasks.jsx";
 import LandlordContacts from "./LandlordContacts.jsx";
 import LandlordAcquisitions from "./LandlordAcquisitions.jsx";
+import LandlordDealAnalyzer from "./LandlordDealAnalyzer.jsx";
 import LandlordDocuments from "./LandlordDocuments.jsx";
 import LandlordSettings from "./LandlordSettings.jsx";
 import { pwValid, friendlyPwError, PasswordChecklist } from "./PasswordFields.jsx";
@@ -28,6 +29,7 @@ function Icon({ name }) {
     users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M17 11a4 4 0 0 0 0-8M22 21v-1a6 6 0 0 0-4-5.6",
     check: "M4 12l5 5L20 6",
     target: "M12 12m-9 0a9 9 0 1 0 18 0 9 9 0 1 0-18 0M12 12m-4 0a4 4 0 1 0 8 0 4 4 0 1 0-8 0",
+    calc: "M6 2h12v20H6zM9 6h6v3H9zM8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01",
     team: "M16 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 21v-2a4 4 0 0 1 4-4M18 17l1.5 1.5M20 15l-4 4",
     gear: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 2h-4l-.3 2.9a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L4 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.9h4l.3-2.9a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1z",
   };
@@ -49,6 +51,7 @@ const MODULES = [
   { key: "contacts", label: "Contacts", icon: "users", scope: "contacts" },
   { key: "tasks", label: "Tasks", icon: "check", scope: "tasks" },
   { key: "deals", label: "Acquisitions", icon: "target", scope: "deals" },
+  { key: "analyzer", label: "Deal analyzer", icon: "calc", scope: "deals" },
 ];
 
 function Placeholder({ label }) {
@@ -284,10 +287,11 @@ export default function LandlordApp() {
         {view === "tasks" && <LandlordTasks membership={active} notify={setToast} />}
         {view === "contacts" && <LandlordContacts membership={active} notify={setToast} />}
         {view === "deals" && <LandlordAcquisitions membership={active} notify={setToast} />}
+        {view === "analyzer" && <LandlordDealAnalyzer membership={active} notify={setToast} />}
         {view === "documents" && <LandlordDocuments membership={active} notify={setToast} />}
         {view === "team" && <LandlordTeam membership={active} notify={setToast} selfUserId={session.user?.id} />}
         {view === "settings" && <LandlordSettings membership={active} notify={setToast} onAccountRenamed={reloadMemberships} />}
-        {current && !["dashboard", "properties", "financials", "bills", "vault", "tasks", "contacts", "deals", "documents", "team", "settings"].includes(view) && <Placeholder label={current.label} />}
+        {current && !["dashboard", "properties", "financials", "bills", "vault", "tasks", "contacts", "deals", "analyzer", "documents", "team", "settings"].includes(view) && <Placeholder label={current.label} />}
       </div>
 
       {toast && <div className="toast">{toast}</div>}
