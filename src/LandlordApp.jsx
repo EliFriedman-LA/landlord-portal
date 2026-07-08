@@ -266,6 +266,7 @@ export default function LandlordApp() {
           <button onClick={() => signOut()}>Sign out</button>
         </div>
       </aside>
+      {sideOpen && <div className="ll-backdrop" onClick={() => setSideOpen(false)} />}
 
       <div className="ll-main">
         <header className="ll-top">

@@ -55,6 +55,8 @@ export const createAnalysis = (obj) => sb.from("landlord_deal_analysis").insert(
 export const removeAnalysis = (id) => sb.from("landlord_deal_analysis").delete().eq("id", id).then(okVoid);
 
 /* --------------------------- analyzer math ----------------------------- */
+// Backward compatible: older saved analyses have no reserves/splits/owner-draw
+// keys — n() treats missing as 0, and splits defaults to an empty list.
 export function computeAnalysis(i) {
   const n = (v) => (v === "" || v == null || isNaN(Number(v)) ? 0 : Number(v));
   const purchase = n(i.purchase_price), rehab = n(i.rehab_cost), closing = n(i.closing_cost);
@@ -63,6 +65,7 @@ export function computeAnalysis(i) {
   const rent = n(i.monthly_rent), taxes = n(i.annual_taxes), ins = n(i.annual_insurance), other = n(i.other_monthly);
   const payoff = n(i.loan_payoff), refiCost = n(i.refi_cost);
   const salePrice = n(i.exit_sale_price), saleCostPct = n(i.exit_cost_pct) / 100;
+  const reserveMonths = n(i.reserve_months), ownerDraw = n(i.owner_draw_monthly);
 
   const allIn = purchase + rehab + closing;
   const refiLoan = arv * ltv;
@@ -77,10 +80,51 @@ export function computeAnalysis(i) {
   const dscr = piti > 0 ? rent / piti : 0;
   const monthlyCF = rent - piti;
   const annualCF = monthlyCF * 12;
+
+  // Operating metrics (before debt service)
+  const noiMonthly = rent - (taxes / 12 + ins / 12 + other);
+  const noi = noiMonthly * 12;
+  const capRate = allIn > 0 ? (noi / allIn) * 100 : 0;
+  const onePct = purchase > 0 ? (rent / purchase) * 100 : 0;   // want >= 1.0
+  const grm = rent * 12 > 0 ? allIn / (rent * 12) : 0;
+
+  // Cash position
   const cashReturned = refiLoan - payoff - refiCost;
   const cashLeftIn = allIn - (refiLoan - payoff);
+  const reserves = reserveMonths * piti;                       // cash set aside
+  const totalCashNeeded = Math.max(0, cashLeftIn) + reserves;
   const coc = cashLeftIn > 0 ? (annualCF / cashLeftIn) * 100 : null; // null = all capital pulled out
+
+  // Owner draw ("profit first") reduces retained cash flow
+  const netMonthlyCF = monthlyCF - ownerDraw;
+  const netAnnualCF = netMonthlyCF * 12;
+
+  // Exit
   const saleProceeds = salePrice * (1 - saleCostPct) - payoff;
 
-  return { allIn, refiLoan, pi, piti, dscr, monthlyCF, annualCF, cashReturned, cashLeftIn, coc, saleProceeds };
+  // Partner splits — allocate cash-in and annual cash flow by percentage
+  const rawSplits = Array.isArray(i.splits) ? i.splits : [];
+  const splitBase = cashLeftIn > 0 ? cashLeftIn : 0;
+  const splits = rawSplits
+    .filter((sp) => sp && (sp.name || sp.pct))
+    .map((sp) => {
+      const pct = n(sp.pct);
+      return { name: sp.name || "Partner", pct, cash_in: splitBase * pct / 100, annual_cf: annualCF * pct / 100 };
+    });
+  const splitPctTotal = splits.reduce((a, sp) => a + sp.pct, 0);
+
+  // Simple verdict
+  let verdict = "review", verdictNote = "";
+  if (piti === 0 && rent === 0) { verdict = "review"; verdictNote = "Enter rent and loan terms to score this deal."; }
+  else if (dscr >= 1.25 && monthlyCF >= 0 && (coc === null || coc >= 8)) { verdict = "pass"; verdictNote = "Strong: covers debt with margin and healthy return."; }
+  else if (dscr >= 1.0 && monthlyCF >= 0) { verdict = "watch"; verdictNote = "Workable but thin — check reserves and rate assumptions."; }
+  else { verdict = "fail"; verdictNote = "Negative cash flow or DSCR below 1.0 at these numbers."; }
+
+  return {
+    allIn, refiLoan, pi, piti, dscr, monthlyCF, annualCF,
+    noi, capRate, onePct, grm,
+    cashReturned, cashLeftIn, reserves, totalCashNeeded, coc,
+    ownerDraw, netMonthlyCF, netAnnualCF,
+    saleProceeds, splits, splitPctTotal, verdict, verdictNote,
+  };
 }

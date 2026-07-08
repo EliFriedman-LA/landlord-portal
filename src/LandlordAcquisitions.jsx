@@ -208,12 +208,15 @@ const A_FIELDS = [
   { key: "other_monthly", label: "Other monthly costs" },
   { key: "exit_sale_price", label: "Exit sale price" },
   { key: "exit_cost_pct", label: "Selling costs %" },
+  { key: "reserve_months", label: "Reserve (months of PITI)" },
+  { key: "owner_draw_monthly", label: "Owner draw / mo (profit first)" },
 ];
 
 function Analyzer({ accountId, notify, properties }) {
-  const [inp, setInp] = useState({ refi_ltv: 75, rate: 7.25, amort_years: 30, exit_cost_pct: 8, interest_only: false });
+  const [inp, setInp] = useState({ refi_ltv: 75, rate: 7.25, amort_years: 30, exit_cost_pct: 8, reserve_months: 2, interest_only: false, splits: [] });
   const [saved, setSaved] = useState([]);
   const [label, setLabel] = useState("");
+  const [prefillId, setPrefillId] = useState("");
   const out = useMemo(() => computeAnalysis(inp), [inp]);
 
   async function loadSaved() {
@@ -222,6 +225,25 @@ function Analyzer({ accountId, notify, properties }) {
   useEffect(() => { loadSaved(); /* eslint-disable-next-line */ }, [accountId]);
 
   const set = (k, v) => setInp((s) => ({ ...s, [k]: v }));
+
+  function prefillFromProperty(id) {
+    setPrefillId(id);
+    const p = properties.find((x) => x.id === id);
+    if (!p) return;
+    setInp((s) => ({
+      ...s,
+      purchase_price: p.purchase_price != null ? String(p.purchase_price) : s.purchase_price,
+    }));
+    if (!label.trim()) setLabel(propName(p));
+    notify("Pulled numbers from " + propName(p));
+  }
+
+  // partner splits editors
+  const splits = Array.isArray(inp.splits) ? inp.splits : [];
+  const setSplits = (arr) => set("splits", arr);
+  const addSplit = () => setSplits([...splits, { name: "", pct: "" }]);
+  const editSplit = (idx, key, val) => setSplits(splits.map((sp, i) => (i === idx ? { ...sp, [key]: val } : sp)));
+  const removeSplit = (idx) => setSplits(splits.filter((_, i) => i !== idx));
 
   async function save() {
     if (!label.trim()) { notify("Name this analysis"); return; }
@@ -233,12 +255,28 @@ function Analyzer({ accountId, notify, properties }) {
 
   const dscrColor = out.dscr >= 1.25 ? "var(--ok)" : out.dscr >= 1 ? "var(--warn)" : "var(--danger)";
   const cfColor = out.monthlyCF >= 0 ? "var(--ok)" : "var(--danger)";
+  const netCfColor = out.netMonthlyCF >= 0 ? "var(--ok)" : "var(--danger)";
+  const capColor = out.capRate >= 6 ? "var(--ok)" : out.capRate >= 4 ? "var(--warn)" : "var(--danger)";
+  const onePctColor = out.onePct >= 1 ? "var(--ok)" : out.onePct >= 0.8 ? "var(--warn)" : "var(--danger)";
+  const V = { pass: { bg: "#e9f7ef", bd: "#bde5cd", fg: "var(--ok)", label: "Strong deal" },
+              watch: { bg: "#fff6e8", bd: "#f0c98a", fg: "var(--warn)", label: "Proceed with care" },
+              fail: { bg: "#fdecea", bd: "#e6c3bf", fg: "var(--danger)", label: "Does not pencil" },
+              review: { bg: "#eef1f4", bd: "var(--line)", fg: "var(--muted)", label: "Add inputs" } }[out.verdict] || {};
 
   return (
     <div>
       <div className="ll-grid" style={{ gridTemplateColumns: "minmax(0,1.1fr) minmax(0,0.9fr)", alignItems: "start" }}>
         <div className="ll-card"><div className="pad">
           <h3>Inputs</h3>
+          {properties.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <label className="fld">Prefill from a property</label>
+              <select className="select" value={prefillId} onChange={(e) => prefillFromProperty(e.target.value)}>
+                <option value="">— start blank —</option>
+                {properties.map((p) => <option key={p.id} value={p.id}>{propName(p)}</option>)}
+              </select>
+            </div>
+          )}
           <label className="chk" style={{ margin: "6px 0 12px" }}>
             <input type="checkbox" checked={!!inp.interest_only} onChange={(e) => set("interest_only", e.target.checked)} /> Interest-only loan (DSCR)
           </label>
@@ -250,21 +288,70 @@ function Analyzer({ accountId, notify, properties }) {
               </div>
             ))}
           </div>
+
+          <div style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <label className="fld" style={{ margin: 0 }}>Ownership split</label>
+              <button className="btn ghost sm" onClick={addSplit}>+ Partner</button>
+            </div>
+            {splits.length === 0 ? (
+              <div className="hint">Add partners to divide cash-in and cash flow by percentage.</div>
+            ) : (
+              <>
+                {splits.map((sp, idx) => (
+                  <div className="row" key={idx} style={{ alignItems: "flex-end", marginBottom: 8 }}>
+                    <div style={{ flex: "1 1 160px" }}>
+                      <input className="input" placeholder="Partner name" value={sp.name || ""} onChange={(e) => editSplit(idx, "name", e.target.value)} />
+                    </div>
+                    <div style={{ width: 96 }}>
+                      <input className="input" type="number" placeholder="%" value={sp.pct ?? ""} onChange={(e) => editSplit(idx, "pct", e.target.value)} />
+                    </div>
+                    <button className="btn danger sm" onClick={() => removeSplit(idx)}>✕</button>
+                  </div>
+                ))}
+                <div className="hint" style={{ color: out.splitPctTotal === 100 ? "var(--ok)" : "var(--warn)" }}>
+                  Total {out.splitPctTotal}% {out.splitPctTotal === 100 ? "✓" : "· should equal 100%"}
+                </div>
+              </>
+            )}
+          </div>
         </div></div>
 
         <div className="ll-card"><div className="pad">
           <h3>Results</h3>
+          <div style={{ background: V.bg, border: "1px solid " + V.bd, borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+            <b style={{ color: V.fg }}>{V.label}</b>
+            <div className="hint" style={{ marginTop: 2 }}>{out.verdictNote}</div>
+          </div>
           <Result label="All-in cost" value={money(out.allIn)} />
+          <Result label="NOI (annual)" value={money(out.noi)} />
+          <Result label="Cap rate" value={out.capRate ? out.capRate.toFixed(1) + "%" : "—"} color={capColor} />
+          <Result label="1% rule (rent / price)" value={out.onePct ? out.onePct.toFixed(2) + "%" : "—"} color={onePctColor} />
           <Result label="Refinance loan" value={money(out.refiLoan)} />
           <Result label="Monthly P&I" value={money(out.pi)} />
           <Result label="PITI" value={money(out.piti)} />
           <Result label="DSCR" value={out.dscr ? out.dscr.toFixed(2) : "—"} color={dscrColor} />
           <Result label="Monthly cash flow" value={money(out.monthlyCF)} color={cfColor} />
+          {out.ownerDraw > 0 && <Result label="After owner draw / mo" value={money(out.netMonthlyCF)} color={netCfColor} />}
           <Result label="Annual cash flow" value={money(out.annualCF)} color={cfColor} />
           <Result label="Cash out on refi" value={money(out.cashReturned)} />
           <Result label="Cash left in deal" value={out.cashLeftIn <= 0 ? "$0 (all out)" : money(out.cashLeftIn)} />
+          {out.reserves > 0 && <Result label="Reserves set aside" value={money(out.reserves)} />}
+          <Result label="Total cash needed" value={money(out.totalCashNeeded)} />
           <Result label="Cash-on-cash" value={out.coc === null ? "∞ (no cash left in)" : out.coc.toFixed(1) + "%"} />
           <Result label="Sale proceeds (exit)" value={money(out.saleProceeds)} />
+
+          {out.splits.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div className="hint" style={{ fontWeight: 700, color: "var(--nv)", marginBottom: 4 }}>By partner</div>
+              {out.splits.map((sp, idx) => (
+                <div key={idx} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid var(--line)" }}>
+                  <span className="hint">{sp.name} · {sp.pct}%</span>
+                  <b style={{ color: "var(--nv)", fontSize: 13 }}>{money(sp.cash_in)} in · {money(sp.annual_cf)}/yr</b>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="row" style={{ marginTop: 14, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
@@ -287,7 +374,7 @@ function Analyzer({ accountId, notify, properties }) {
                   <span className="hint"> · DSCR {a.results?.dscr ? Number(a.results.dscr).toFixed(2) : "—"} · CF {money(a.results?.monthlyCF)}/mo · {new Date(a.created_at).toLocaleDateString()}</span>
                 </div>
                 <div style={{ whiteSpace: "nowrap" }}>
-                  <button className="btn ghost sm" onClick={() => setInp(a.inputs || {})}>Load</button>{" "}
+                  <button className="btn ghost sm" onClick={() => setInp({ splits: [], ...(a.inputs || {}) })}>Load</button>{" "}
                   <button className="btn danger sm" onClick={() => removeAnalysis(a.id).then(loadSaved)}>Delete</button>
                 </div>
               </div>

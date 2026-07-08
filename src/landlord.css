@@ -139,12 +139,14 @@ table.ll-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ll-login .sub { color: var(--muted); font-size: 13px; margin: 3px 0 20px; }
 .ll-login .ok { background: #e9f7ef; border: 1px solid #bde5cd; color: var(--ok); padding: 12px 14px; border-radius: 10px; font-size: 14px; }
 
+.ll-menu-btn { display: none; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+.ll-backdrop { display: none; }
 @media (max-width: 780px) {
   .ll-side { position: fixed; z-index: 20; transform: translateX(-100%); transition: transform .2s; }
   .ll-side.open { transform: none; }
   .ll-menu-btn { display: inline-flex; }
+  .ll-backdrop { display: block; position: fixed; inset: 0; background: rgba(16,26,40,.4); z-index: 15; }
 }
-.ll-menu-btn { display: none; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
 
 /* ---------- forms, tabs, detail (Batch 3) ---------- */
 .form-grid { display: grid; gap: 14px 16px; grid-template-columns: repeat(2, 1fr); }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   listIncome, listExpenses, listBills,
   income, expenses, bills, billAllocations, PAY_METHODS, money,
@@ -8,6 +8,27 @@ import { RecordForm } from "./landlordForm.jsx";
 
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString() : "");
 const propName = (p) => (p ? p.label || p.full_address || "Property" : "—");
+
+// MM/DD/YYYY (or similar) -> YYYY-MM-DD for <input type=date>; else "".
+function toIsoDate(v) {
+  if (!v) return "";
+  const m = String(v).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (m) {
+    let [, mo, da, yr] = m;
+    if (yr.length === 2) yr = "20" + yr;
+    return `${yr}-${mo.padStart(2, "0")}-${da.padStart(2, "0")}`;
+  }
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
 
 /* -------------------------- income / expense ledger -------------------------- */
 function Ledger({ kind, api, load, accountId, notify, properties, contacts }) {
@@ -232,6 +253,10 @@ function Bills({ accountId, notify, properties, contacts }) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [prefill, setPrefill] = useState(null);       // AI-parsed draft for the add form
+  const [parsedItems, setParsedItems] = useState([]); // line items shown under the form
+  const [aiBusy, setAiBusy] = useState(false);
+  const fileRef = useRef(null);
 
   async function refresh() {
     setLoading(true);
@@ -255,24 +280,94 @@ function Bills({ accountId, notify, properties, contacts }) {
     { key: "notes", label: "Notes", type: "textarea" },
   ];
 
+  function startBlank() { setPrefill(null); setParsedItems([]); setAdding(true); }
+  function cancelAdd() { setAdding(false); setPrefill(null); setParsedItems([]); }
+
+  async function onPdf(e) {
+    const file = e.target.files && e.target.files[0];
+    if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name)) { notify("Please choose a PDF bill."); return; }
+    setAiBusy(true);
+    try {
+      const pdfBase64 = await fileToBase64(file);
+      const r = await fetch("/api/extract-bill", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdfBase64, fileName: file.name }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Could not read that bill.");
+      const d = j.data || {};
+      // match vendor name to an existing contact
+      const vn = (d.vendor_name || "").toLowerCase().trim();
+      const match = vn ? contacts.find((c) => {
+        const nm = (c.name || "").toLowerCase().trim();
+        return nm === vn || nm.includes(vn) || vn.includes(nm);
+      }) : null;
+      const items = Array.isArray(d.line_items) ? d.line_items : [];
+      const itemsNote = items.length
+        ? "Line items:\n" + items.map((li) => `- ${li.description || "Item"}: $${li.amount}`).join("\n")
+        : "";
+      const notesBits = [d.vendor_name && !match ? `Vendor: ${d.vendor_name}` : "", itemsNote].filter(Boolean);
+      setPrefill({
+        status: "unpaid",
+        vendor_contact_id: match ? match.id : undefined,
+        bill_date: toIsoDate(d.bill_date),
+        due_date: toIsoDate(d.due_date),
+        total_amount: d.total_amount != null ? d.total_amount : "",
+        category: d.category || "",
+        notes: notesBits.join("\n\n"),
+      });
+      setParsedItems(items);
+      setAdding(true);
+      notify(match ? "Bill read — vendor matched. Review and save." : "Bill read — review and save." + (d.vendor_name ? ` (add "${d.vendor_name}" as a contact to link it)` : ""));
+    } catch (err) {
+      notify(err.message || "Could not read that bill.");
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   async function add(draft) {
     if (draft.total_amount === null || draft.total_amount === undefined || draft.total_amount === "") { notify("Enter a total"); return; }
     setSaving(true);
-    try { await bills.create({ account_id: accountId, status: "unpaid", ...draft }); setAdding(false); notify("Bill added"); refresh(); }
+    try { await bills.create({ account_id: accountId, status: "unpaid", ...draft }); cancelAdd(); notify("Bill added"); refresh(); }
     catch (e) { notify(e.message || "Save failed"); }
     finally { setSaving(false); }
   }
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-        {!adding && <button className="btn blue" onClick={() => setAdding(true)}>+ Add bill</button>}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
+        {!adding && (
+          <>
+            <button className="btn ghost" onClick={() => fileRef.current && fileRef.current.click()} disabled={aiBusy}>
+              {aiBusy ? "Reading…" : "⤓ Upload bill PDF"}
+            </button>
+            <button className="btn blue" onClick={startBlank}>+ Add bill</button>
+          </>
+        )}
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onPdf} style={{ display: "none" }} />
       </div>
       {adding && (
         <div className="ll-card" style={{ marginBottom: 16 }}><div className="pad">
-          <h3>New bill</h3>
-          <RecordForm fields={addFields} record={{ status: "unpaid" }} onSave={add} saving={saving} saveLabel="Add bill"
-            extraButtons={<button className="btn ghost" onClick={() => setAdding(false)}>Cancel</button>} />
+          <h3>{prefill ? "New bill (from PDF)" : "New bill"}</h3>
+          {prefill && <div className="note" style={{ marginBottom: 12 }}>Fields below were read from your PDF — check the total, vendor and dates before saving.</div>}
+          <RecordForm fields={addFields} record={prefill || { status: "unpaid" }} onSave={add} saving={saving} saveLabel="Add bill"
+            extraButtons={<button className="btn ghost" onClick={cancelAdd}>Cancel</button>} />
+          {parsedItems.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div className="hint" style={{ fontWeight: 700, color: "var(--nv)", marginBottom: 4 }}>Line items read from the bill</div>
+              <div className="mini-list">
+                {parsedItems.map((li, idx) => (
+                  <div className="item" key={idx}>
+                    <span className="hint">{li.description || "Item"}</span>
+                    <b>{money(li.amount)}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="hint" style={{ marginTop: 8 }}>After adding, open the bill to split it across properties.</div>
         </div></div>
       )}
