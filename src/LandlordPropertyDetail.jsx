@@ -6,6 +6,7 @@ import {
 } from "./landlordProps.js";
 import { listDocs, uploadDoc, signedUrl, removeDoc, formatSize, DOC_CATEGORIES } from "./landlordDocs.js";
 import { RecordForm, Field } from "./landlordForm.jsx";
+import { listSchedules, recurring, RECUR_INTERVALS, RECUR_KINDS, intervalLabel, PAY_METHODS } from "./landlordMoney.js";
 
 /* -------------------------------- schemas -------------------------------- */
 const TYPE_OPTS = [
@@ -563,9 +564,119 @@ function DocumentsTab({ propertyId, accountId, notify }) {
   );
 }
 
+/* ----------------------------- recurring tab ----------------------------- */
+function RecurringTab({ property, accountId, notify }) {
+  const propertyId = property?.id;
+  const [rows, setRows] = useState([]);
+  const [contactsList, setContactsList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null); // id | "new" | null
+  const [saving, setSaving] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const [all, cs] = await Promise.all([
+        listSchedules(accountId),
+        contacts.list({ account_id: accountId }, "name"),
+      ]);
+      setRows((all || []).filter((r) => r.property_id === propertyId));
+      setContactsList(cs || []);
+    } catch (e) { notify(e.message || "Load failed"); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [accountId, propertyId]);
+
+  const vendorOpts = contactsList.map((c) => ({ value: c.id, label: c.name }));
+  const fields = [
+    { key: "kind", label: "Type", type: "select", options: RECUR_KINDS },
+    { key: "label", label: "Name", placeholder: "e.g. Rent, Mortgage, Insurance" },
+    { key: "amount", label: "Expected amount", type: "number" },
+    { key: "interval_months", label: "Frequency", type: "select", options: RECUR_INTERVALS },
+    { key: "day_of_month", label: "Day of month due", type: "number", placeholder: "1" },
+    { key: "start_date", label: "Starts", type: "date" },
+    { key: "end_date", label: "Ends (optional)", type: "date" },
+    { key: "vendor_contact_id", label: "Vendor (expense / bill)", type: "select", options: vendorOpts },
+    { key: "category", label: "Category", placeholder: "rent / mortgage / insurance" },
+    { key: "method", label: "Method", type: "select", options: PAY_METHODS },
+    { key: "active", label: "Active", type: "checkbox" },
+    { key: "notes", label: "Notes", type: "textarea" },
+  ];
+
+  async function save(draft) {
+    const kind = draft.kind || "income";
+    if (draft.amount === null || draft.amount === undefined || draft.amount === "") { notify("Enter an expected amount"); return; }
+    if (!draft.start_date) { notify("Pick a start date"); return; }
+    const payload = {
+      ...draft, kind, property_id: propertyId,
+      amount: Number(draft.amount),
+      interval_months: Number(draft.interval_months) || 1,
+      day_of_month: Number(draft.day_of_month) || 1,
+      active: draft.active === undefined ? true : !!draft.active,
+    };
+    setSaving(true);
+    try {
+      if (editing === "new") await recurring.create({ account_id: accountId, ...payload });
+      else await recurring.update(editing, payload);
+      setEditing(null); notify("Saved"); refresh();
+    } catch (e) { notify(e.message || "Save failed"); }
+    finally { setSaving(false); }
+  }
+  async function del(id) {
+    if (!confirm("Delete this schedule? Already-logged entries stay; future ones stop.")) return;
+    try { await recurring.remove(id); notify("Deleted"); refresh(); }
+    catch (e) { notify(e.message || "Delete failed"); }
+  }
+  async function togglePause(r) {
+    try { await recurring.update(r.id, { active: !r.active }); notify(r.active ? "Paused" : "Resumed"); refresh(); }
+    catch (e) { notify(e.message || "Failed"); }
+  }
+
+  const editRow = editing && editing !== "new" ? rows.find((r) => r.id === editing) : null;
+  const defaultRecord = { kind: "income", interval_months: 1, day_of_month: 1, active: true, start_date: new Date().toISOString().slice(0, 10), category: "rent" };
+
+  return (
+    <div>
+      <div className="hint" style={{ marginBottom: 12 }}>
+        Recurring rent, mortgage and other repeating items for this property. When each comes due it appears under
+        <b> To confirm</b> in Financials (and on the dashboard) to log with one click. Bill splits across properties are set in Financials.
+      </div>
+      {loading ? <div className="hint">Loading…</div> : rows.length === 0 && editing !== "new" ? (
+        <div className="hint" style={{ marginBottom: 12 }}>No recurring items for this property yet.</div>
+      ) : (
+        <div className="mini-list" style={{ marginBottom: 14 }}>
+          {rows.map((r) => (
+            <div className="item" key={r.id} style={{ opacity: r.active ? 1 : 0.55 }}>
+              <div>
+                <b>{r.label || (r.kind === "income" ? "Income" : r.kind === "bill" ? "Bill" : "Expense")} · {money(r.amount)}</b>
+                <span className="hint"> · {intervalLabel(r.interval_months)} · day {r.day_of_month}
+                  {r.vendor?.name ? " · " + r.vendor.name : ""}{!r.active ? " · paused" : ""}</span>
+              </div>
+              <div style={{ whiteSpace: "nowrap" }}>
+                <button className="btn ghost sm" onClick={() => togglePause(r)}>{r.active ? "Pause" : "Resume"}</button>{" "}
+                <button className="btn ghost sm" onClick={() => setEditing(r.id)}>Edit</button>{" "}
+                <button className="btn danger sm" onClick={() => del(r.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {editing ? (
+        <div className="ll-card"><div className="pad">
+          <h3>{editing === "new" ? "New recurring item" : "Edit recurring item"}</h3>
+          <RecordForm fields={fields} record={editRow || defaultRecord} onSave={save} saving={saving}
+            extraButtons={<button className="btn ghost" onClick={() => setEditing(null)}>Cancel</button>} />
+        </div></div>
+      ) : (
+        <button className="btn blue" onClick={() => setEditing("new")}>+ Add recurring item</button>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------- main view ------------------------------- */
 const TABS = [
-  "Overview", "Entity / LLC", "Purchase", "Cash invested", "Loan", "Leases & tenants",
+  "Overview", "Entity / LLC", "Purchase", "Cash invested", "Loan", "Recurring", "Leases & tenants",
   "Insurance", "Property tax", "Registrations", "Units", "Ownership", "Contacts", "Documents",
 ];
 
@@ -684,6 +795,7 @@ export default function LandlordPropertyDetail({ propertyId, membership, notify,
         summary={(r) => <><b>{r.partner_name}</b><span className="hint"> · {r.pct_after ?? r.pct_prior ?? "?"}%{r.is_iska ? " · iska" : ""}</span></>} />}
       {tab === "Contacts" && <ContactsTab propertyId={propertyId} accountId={accountId} notify={notify} />}
       {tab === "Documents" && <DocumentsTab propertyId={propertyId} accountId={accountId} notify={notify} />}
+      {tab === "Recurring" && <RecurringTab property={prop} accountId={accountId} notify={notify} />}
     </div>
   );
 }
