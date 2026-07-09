@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { getDashboardStats } from "./landlordProps.js";
 import { getUpcoming } from "./landlordTasks.js";
+import { ensureOccurrences, countOutstanding } from "./landlordMoney.js";
 
 export default function LandlordDashboard({ membership, nav, onOpen }) {
   const accountId = membership.account_id;
@@ -8,6 +9,7 @@ export default function LandlordDashboard({ membership, nav, onOpen }) {
   const modules = nav.filter((n) => !["dashboard"].includes(n.key));
   const [stats, setStats] = useState(null);
   const [dueSoon, setDueSoon] = useState(null);
+  const [toConfirm, setToConfirm] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,11 +27,17 @@ export default function LandlordDashboard({ membership, nav, onOpen }) {
         }).length;
         if (!cancelled) setDueSoon(soon);
       } catch { if (!cancelled) setDueSoon(0); }
+      try {
+        await ensureOccurrences(accountId);
+        const n = await countOutstanding(accountId);
+        if (!cancelled) setToConfirm(n);
+      } catch { if (!cancelled) setToConfirm(0); }
     })();
     return () => { cancelled = true; };
   }, [accountId]);
 
   const v = (n) => (n === null || n === undefined ? "—" : n);
+  const canFinancials = !!nav.find((n) => n.key === "financials");
 
   return (
     <div className="ll-content">
@@ -46,6 +54,9 @@ export default function LandlordDashboard({ membership, nav, onOpen }) {
             <Stat label="Active leases" value={v(stats?.leases)} onClick={() => onOpen("properties")} />
             <Stat label="Open tasks" value={v(stats?.openTasks)} onClick={() => onOpen("tasks")} />
             <Stat label="Due in 30 days" value={v(dueSoon)} onClick={() => onOpen("tasks")} highlight={dueSoon > 0} />
+            {canFinancials && (
+              <Stat label="To confirm" value={v(toConfirm)} onClick={() => onOpen("financials")} highlight={toConfirm > 0} />
+            )}
           </div>
         </div>
       </div>
