@@ -3,6 +3,23 @@ import { landlordDb as sb } from "./landlordDb.js";
 const ok = ({ data, error }) => { if (error) throw error; return data; };
 const okVoid = ({ error }) => { if (error) throw error; };
 
+// Reads a bill PDF via the server (which holds the AI key). The endpoint now
+// requires a signed-in session, so send the access token the same way
+// landlordDb.js does for /api/landlord-team.
+export async function extractBill({ pdfBase64, fileName }) {
+  const { data: sess } = await sb.auth.getSession();
+  const token = sess?.session?.access_token;
+  if (!token) throw new Error("Your session has expired — sign in again to read bills.");
+  const r = await fetch("/api/extract-bill", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ pdfBase64, fileName }),
+  });
+  const j = await r.json().catch(() => ({ ok: false, error: "Could not read that bill." }));
+  if (!j.ok) throw new Error(j.error || "Could not read that bill.");
+  return j.data || {};
+}
+
 function crud(table) {
   return {
     create: (obj) => sb.from(table).insert(obj).select().single().then(ok),

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.vercel/
+
+# Never commit secrets — the service key lives in Vercel's env settings only
+.env
+.env.*

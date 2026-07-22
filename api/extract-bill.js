@@ -71,12 +71,37 @@ async function anthropic(apiKey, payload) {
   return (data.content || []).filter(c => c.type === "text").map(c => c.text).join("\n").trim();
 }
 
+// This endpoint spends our Anthropic credits, so it must not be usable by anyone
+// who happens to know the URL. Require a real Supabase session — the same bearer
+// token landlordDb.js already sends to /api/landlord-team.
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+async function signedInError(req) {
+  const raw = req.headers.authorization || req.headers.Authorization || "";
+  const token = raw.startsWith("Bearer ") ? raw.slice(7).trim() : "";
+  if (!token) return "Please sign in again — this request arrived without a session.";
+  if (!SUPABASE_URL || !SUPABASE_ANON) return "This server is missing its authentication settings.";
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${token}` }
+    });
+    if (!r.ok) return "Your session has expired — sign out and back in, then try again.";
+  } catch {
+    return "Could not check your sign-in just now. Please try again.";
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
+
+  const authError = await signedInError(req);
+  if (authError) return res.status(401).json({ ok: false, error: authError });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ ok: false, error: "ANTHROPIC_API_KEY is not set. Add it in Vercel -> Settings -> Environment Variables, then redeploy." });

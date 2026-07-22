@@ -4,6 +4,7 @@ import {
   income, expenses, bills, billAllocations, PAY_METHODS, money,
   recurring, listSchedules, ensureOccurrences, listOutstanding,
   confirmOccurrence, skipOccurrence, RECUR_INTERVALS, RECUR_KINDS, intervalLabel,
+  extractBill,
 } from "./landlordMoney.js";
 import { listProperties, contacts as contactsApi } from "./landlordProps.js";
 import { RecordForm } from "./landlordForm.jsx";
@@ -272,13 +273,7 @@ function Bills({ accountId, notify, properties, contacts }) {
     setAiBusy(true);
     try {
       const pdfBase64 = await fileToBase64(file);
-      const r = await fetch("/api/extract-bill", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdfBase64, fileName: file.name }),
-      });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "Could not read that bill.");
-      const d = j.data || {};
+      const d = await extractBill({ pdfBase64, fileName: file.name });
       // match vendor name to an existing contact
       const vn = (d.vendor_name || "").toLowerCase().trim();
       const match = vn ? contacts.find((c) => {
