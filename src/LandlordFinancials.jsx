@@ -4,7 +4,7 @@ import {
   income, expenses, bills, billAllocations, PAY_METHODS, money,
   recurring, listSchedules, ensureOccurrences, listOutstanding,
   confirmOccurrence, skipOccurrence, RECUR_INTERVALS, RECUR_KINDS, intervalLabel,
-  extractBill,
+  extractBill, billLines, saveBillLines, recallLineProperties,
 } from "./landlordMoney.js";
 import { listProperties, contacts as contactsApi } from "./landlordProps.js";
 import { RecordForm } from "./landlordForm.jsx";
@@ -135,6 +135,105 @@ function Ledger({ kind, api, load, accountId, notify, properties, contacts }) {
     </div>
   );
 }
+/* ------------------------------ charge line ------------------------------- */
+// One line the vendor billed. Assign it to a property in a click, split it
+// across several, or mark it as not yours — the bill total never changes, so
+// your records still match the invoice.
+function ChargeLine({ line, billId, accountId, properties, notify, refresh, suggested }) {
+  const [prop, setProp] = useState("");
+  const [amt, setAmt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const allocs = line.allocations || [];
+  const assigned = allocs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+  const left = Math.round(((Number(line.amount) || 0) - assigned) * 100) / 100;
+  const settled = Math.abs(left) < 0.005;
+
+  // Pre-select where this charge went last time; the person still confirms.
+  useEffect(() => { if (!prop && suggested) setProp(suggested); /* eslint-disable-next-line */ }, [suggested]);
+
+  async function assign() {
+    const value = amt === "" ? left : Number(amt);
+    if (!prop) { notify("Pick a property for this charge"); return; }
+    if (!value) { notify("Nothing left to assign on this charge"); return; }
+    setBusy(true);
+    try {
+      await billAllocations.create({
+        account_id: accountId, bill_id: billId, line_id: line.id,
+        property_id: prop, amount: value,
+      });
+      setAmt(""); refresh();
+    } catch (e) { notify(e.message || "Could not assign that charge"); }
+    finally { setBusy(false); }
+  }
+  async function unassign(id) {
+    try { await billAllocations.remove(id); refresh(); }
+    catch (e) { notify(e.message || "Could not undo that"); }
+  }
+  async function toggleExcluded() {
+    try { await billLines.update(line.id, { excluded: !line.excluded }); refresh(); }
+    catch (e) { notify(e.message || "Could not update that charge"); }
+  }
+  async function removeLine() {
+    if (!confirm("Delete this charge line? Use “Not mine” instead if it was on the bill but isn't yours.")) return;
+    try { await billLines.remove(line.id); refresh(); }
+    catch (e) { notify(e.message || "Could not delete that charge"); }
+  }
+
+  return (
+    <div className="item" style={{ display: "block", opacity: line.excluded ? 0.55 : 1 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
+        <span style={{ textDecoration: line.excluded ? "line-through" : "none" }}>
+          {line.description || "Charge"}
+        </span>
+        <b>{money(line.amount)}</b>
+      </div>
+
+      {allocs.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          {allocs.map((a) => (
+            <div key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span className="hint">→ {propName(a.property)} · <b>{money(a.amount)}</b></span>
+              <button className="btn ghost sm" onClick={() => unassign(a.id)}>Undo</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!line.excluded && !settled && (
+        <div className="row" style={{ alignItems: "flex-end", marginTop: 8 }}>
+          <div style={{ flex: "1 1 180px" }}>
+            <select className="select" value={prop} onChange={(e) => setProp(e.target.value)}>
+              <option value="">— choose property —</option>
+              {properties.map((p) => <option key={p.id} value={p.id}>{propName(p)}</option>)}
+            </select>
+          </div>
+          <div style={{ width: 110 }}>
+            <input className="input" type="number" placeholder={money(left)} value={amt}
+              onChange={(e) => setAmt(e.target.value)} />
+          </div>
+          <button className="btn blue sm" onClick={assign} disabled={busy}>
+            {allocs.length ? "Split" : "Assign"}
+          </button>
+        </div>
+      )}
+
+      <div className="hint" style={{ marginTop: 6, display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <span>
+          {line.excluded ? "Not yours — left out of the split"
+            : settled ? "Fully assigned"
+            : money(left) + " still to assign"}
+        </span>
+        <span style={{ display: "flex", gap: 8 }}>
+          <button className="btn ghost sm" onClick={toggleExcluded}>
+            {line.excluded ? "It is mine" : "Not mine"}
+          </button>
+          <button className="btn ghost sm" onClick={removeLine}>Delete</button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* -------------------------------- bill row -------------------------------- */
 function BillRow({ bill, accountId, notify, properties, contacts, refresh }) {
   const [open, setOpen] = useState(false);
@@ -142,8 +241,30 @@ function BillRow({ bill, accountId, notify, properties, contacts, refresh }) {
   const [editBill, setEditBill] = useState(false);
   const [allocProp, setAllocProp] = useState("");
   const [allocAmt, setAllocAmt] = useState("");
+  const [suggested, setSuggested] = useState({});
+  // Every allocation counts toward the bill total, whether it came from a charge
+  // line or was entered by hand. The manual list below shows only the hand-typed
+  // ones so a line-level split isn't listed twice.
   const allocated = (bill.allocations || []).reduce((s, a) => s + (Number(a.amount) || 0), 0);
   const remaining = (Number(bill.total_amount) || 0) - allocated;
+  const lines = bill.lines || [];
+  const manualAllocs = (bill.allocations || []).filter((a) => !a.line_id);
+  const lineKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  // Look up where these charges went last time, once the bill is expanded.
+  useEffect(() => {
+    if (!open || !lines.length) return;
+    const need = lines
+      .filter((l) => !l.excluded && !(l.allocations || []).length)
+      .map((l) => l.description);
+    if (!need.length) return;
+    let alive = true;
+    recallLineProperties(accountId, need)
+      .then((m) => { if (alive) setSuggested(m); })
+      .catch(() => {});
+    return () => { alive = false; };
+    /* eslint-disable-next-line */
+  }, [open, accountId, lines.length]);
   const billFields = [
     { key: "vendor_contact_id", label: "Vendor", type: "select", options: contacts.map((c) => ({ value: c.id, label: c.name })) },
     { key: "bill_date", label: "Bill date", type: "date" },
@@ -193,10 +314,25 @@ function BillRow({ bill, accountId, notify, properties, contacts, refresh }) {
       </div>
       {open && (
         <div className="pad" style={{ borderTop: "1px solid var(--line)" }}>
-          <div style={{ fontWeight: 600, color: "var(--nv)", marginBottom: 8 }}>Split across properties</div>
-          {(bill.allocations || []).length > 0 && (
+          {lines.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontWeight: 600, color: "var(--nv)", marginBottom: 8 }}>Charges on this bill</div>
+              <div className="mini-list">
+                {lines.map((l) => (
+                  <ChargeLine key={l.id} line={l} billId={bill.id} accountId={accountId}
+                    properties={properties} notify={notify} refresh={refresh}
+                    suggested={suggested[lineKey(l.description)]} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ fontWeight: 600, color: "var(--nv)", marginBottom: 8 }}>
+            {lines.length > 0 ? "Other amounts" : "Split across properties"}
+          </div>
+          {manualAllocs.length > 0 && (
             <div className="mini-list" style={{ marginBottom: 10 }}>
-              {bill.allocations.map((a) => (
+              {manualAllocs.map((a) => (
                 <div className="item" key={a.id}>
                   <div><b>{money(a.amount)}</b> <span className="hint">· {propName(a.property)}</span></div>
                   <button className="btn danger sm" onClick={() => delAlloc(a.id)}>Remove</button>
@@ -306,7 +442,22 @@ function Bills({ accountId, notify, properties, contacts }) {
   async function add(draft) {
     if (draft.total_amount === null || draft.total_amount === undefined || draft.total_amount === "") { notify("Enter a total"); return; }
     setSaving(true);
-    try { await bills.create({ account_id: accountId, status: "unpaid", ...draft }); cancelAdd(); notify("Bill added"); refresh(); }
+    const items = parsedItems;
+    try {
+      const bill = await bills.create({ account_id: accountId, status: "unpaid", ...draft });
+      // Keep the charges the AI read so each can be assigned to a property.
+      // Saved separately so a hiccup here never loses the bill itself.
+      let lineNote = "";
+      if (bill && items.length) {
+        try {
+          const saved = await saveBillLines(accountId, bill.id, items);
+          lineNote = saved.length ? ` — ${saved.length} charges ready to assign` : "";
+        } catch (e) {
+          lineNote = " — but its charge lines didn't save; add them by hand";
+        }
+      }
+      cancelAdd(); notify("Bill added" + lineNote); refresh();
+    }
     catch (e) { notify(e.message || "Save failed"); }
     finally { setSaving(false); }
   }

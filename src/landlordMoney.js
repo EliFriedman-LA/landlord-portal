@@ -57,10 +57,66 @@ export async function listExpenses(accountId, propertyId) {
 
 export async function listBills(accountId) {
   return sb.from("landlord_bills")
-    .select("*, vendor:landlord_contacts(id,name), allocations:landlord_bill_allocations(id,amount,property_id,property:landlord_properties(id,label,full_address))")
+    .select(
+      "*, vendor:landlord_contacts(id,name)," +
+      "allocations:landlord_bill_allocations(id,amount,property_id,line_id,property:landlord_properties(id,label,full_address))," +
+      "lines:landlord_bill_lines(id,description,amount,sort_order,excluded," +
+        "allocations:landlord_bill_allocations(id,amount,property_id,property:landlord_properties(id,label,full_address)))"
+    )
     .eq("account_id", accountId)
     .order("created_at", { ascending: false })
-    .then(ok);
+    .then(ok)
+    .then((rows) => (rows || []).map((b) => ({
+      ...b,
+      lines: (b.lines || []).slice().sort((x, y) => (x.sort_order || 0) - (y.sort_order || 0)),
+    })));
+}
+
+/* ------------------------- bill charge lines ------------------------------ */
+// One row per line the vendor billed. Each can be assigned to a property — or
+// split across several — so the amounts never have to be retyped.
+export const billLines = crud("landlord_bill_lines");
+
+const normDesc = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+// Store the lines the AI read off a bill. Best effort: a bill that saves but
+// whose lines fail should not look like the whole save failed.
+export async function saveBillLines(accountId, billId, items) {
+  const rows = (items || [])
+    .filter((li) => li && (normDesc(li.description) || Number(li.amount)))
+    .map((li, i) => ({
+      account_id: accountId,
+      bill_id: billId,
+      description: String(li.description || "").trim() || "Charge",
+      amount: Number(li.amount) || 0,
+      sort_order: i,
+    }));
+  if (!rows.length) return [];
+  const { data, error } = await sb.from("landlord_bill_lines").insert(rows).select();
+  if (error) throw error;
+  return data || [];
+}
+
+// Which property did this charge go to last time? Learned from what's already
+// been assigned rather than a list anyone has to maintain. Returns
+// { normalisedDescription: property_id }.
+export async function recallLineProperties(accountId, descriptions) {
+  const wanted = [...new Set((descriptions || []).map(normDesc).filter(Boolean))];
+  if (!wanted.length) return {};
+  const { data, error } = await sb.from("landlord_bill_lines")
+    .select("description, created_at, allocations:landlord_bill_allocations(property_id)")
+    .eq("account_id", accountId)
+    .order("created_at", { ascending: false })
+    .limit(400);
+  if (error) return {};
+  const out = {};
+  for (const line of data || []) {
+    const key = normDesc(line.description);
+    if (!key || out[key] || !wanted.includes(key)) continue;
+    const pid = (line.allocations || []).map((a) => a.property_id).filter(Boolean)[0];
+    if (pid) out[key] = pid;
+  }
+  return out;
 }
 
 export const PAY_METHODS = [
