@@ -379,13 +379,17 @@ function Bills({ accountId, notify, properties, contacts }) {
   const [parsedItems, setParsedItems] = useState([]); // line items shown under the form
   const [aiBusy, setAiBusy] = useState(false);
   const fileRef = useRef(null);
+  // Deliberately does NOT flip `loading` back on. That swaps the whole list for
+  // a "Loading…" placeholder, which unmounts every BillRow and loses track of
+  // which bill was open — so assigning a charge would snap you back to the list.
+  // Rows are simply replaced in place instead.
   async function refresh() {
-    setLoading(true);
     try { setRows(await listBills(accountId)); }
     catch (e) { notify(e.message || "Load failed"); }
     finally { setLoading(false); }
   }
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [accountId]);
+  // Show the placeholder only on first load and when switching accounts.
+  useEffect(() => { setLoading(true); refresh(); /* eslint-disable-next-line */ }, [accountId]);
   const addFields = [
     { key: "vendor_contact_id", label: "Vendor", type: "select", options: contacts.map((c) => ({ value: c.id, label: c.name })) },
     { key: "bill_date", label: "Bill date", type: "date" },
